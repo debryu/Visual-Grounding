@@ -38,9 +38,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 128
+batch_size = 4
 resize = 512
 window_size=32
+
+stride = 1
+kernel_size =8
 
 
 def loadData(path,split):
@@ -279,10 +282,61 @@ def windowize(image,window_size):
         plt.show()
         '''
         return windows,x,y
+    
+def bwindowize(image,window_size):
+        windows  = image.permute(0,2,3,1)
+        #print(windows.shape)
+        windows = windows.unfold(1,window_size,window_size)
+        #print(windows.shape)
+        x = windows.shape[1]
+        windows = windows.unfold(2,window_size,window_size)
+        #print(windows.shape)
+        y = windows.shape[2]
+        #print(y)
+        '''
+        fig, ax = plt.subplots(x, y, figsize=(2*y, 2*x))
+        for i in range(y):
+                for j in range(x):
+                        ax[j,i].imshow(windows[0,i,j].permute(2,1,0))
+                        ax[j,i].axis('off')
+
+        fig.tight_layout()
+        plt.show()
+        '''
+        return windows,x,y
+    
+def computeHeatmap(images,window_size,clipM,labels):
+
+    chops = int(resize/window_size)
+    #recImgs = chunks.permute(0,3,2,5,1,4) # [1,16a,16b,3,32,32] -> [1,3,16b,32,16a,32]
+    #recImgs = recImgs.reshape(batch_size,3,512,512)
+    #plt.imshow(a.permute(2,1,0).to('cpu'))
+    
+        
+    unfold = nn.Unfold((256,256),stride=32)
+    imagesC = unfold(images)
+    imagesC = imagesC.view(4,3,256,256,81).permute(0,1,4,3,2) #chops move downwards
+    #imagesC1 = images[]
+    transforms = torch.nn.Sequential(
+        tt.Resize((224,224), antialias=True, interpolation=Image.BICUBIC),
+        tt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+        )
+    scripted_transforms = torch.jit.script(transforms)
+    
+    imagesCP = []
+    heatmap = torch.zeros(imagesC.size())[:,0,:,:,:]
+    text_input = clip.tokenize(list(labels)).to(device)
+    for i in range(0,imagesC.size()[2]):
+        #clip returns the similarity of each image with respect to all the labels
+        logits_per_image, logits_per_text = clipM(scripted_transforms(imagesC[:,:,i,:,:]), text_input)
+        similarity = torch.diagonal(logits_per_image)
+        heatmap[:,i,:,:] += similarity
+        imagesCP.append()
+    imagesCP = torch.stack(imagesCP).permute(1,2,0,3,4)
 
 def computeHeatmap(windows,window_size,model,text,device):
-    stride = 1
-    kernel_size = 6
+    stride = 1 # moves window_size pixels
+    kernel_size = 8 #merge n number of chunks
     #text = 'a pair of white shoes'
     #txt_embedding = text2embedding(text)
     text_input = clip.tokenize([text]).to(device)
@@ -370,11 +424,14 @@ for epoch in range(1, n_epochs+1):
         heatmaps = torch.zeros(batch_size,16,16,3,window_size,window_size)
 
         bertLabels = torch.zeros(batch_size,768)
-        for i,image in enumerate(images):
-            windowed_images,x_size,y_size = windowize(image,window_size)
-            hm_scores = computeHeatmap(windowed_images,window_size,clipM,label[i],device)
+        windowed_images,x_size,y_size = bwindowize(images, window_size)
+        
+        for i,image in enumerate(windowed_images):
+            #windowed_images,x_size,y_size = windowize(image,window_size)
+            image = image.unsqueeze(0)
+            hm_scores = computeHeatmap(image,window_size,clipM,label[i],device)
             #getHeatmap(windowed_images,hm_scores,x_size,y_size)
-            heatmaps[i] = getHeatmap(windowed_images,hm_scores,x_size,y_size,plot = False)
+            heatmaps[i] = getHeatmap(image,hm_scores,x_size,y_size,plot = False)
             
         
             #Encode label with bert
