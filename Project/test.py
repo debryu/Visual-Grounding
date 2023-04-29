@@ -5,6 +5,8 @@ Created on Thu Apr 20 10:24:49 2023
 @author: Mateo-drr
 """
 
+import gc
+import time
 import os
 import torch
 import torch.nn as nn
@@ -24,10 +26,11 @@ import clip
 torch.backends.cudnn.benchmark = True 
 torch.set_num_threads(4)
 
+start_execution = time.time()
 
 #Bounding box data is bottom left x,y top right x,y 
 
-path = '/Volumes/diskHP/Nicola/dataset/picklesL/'
+path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesL/'
 n_epochs = 25
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
@@ -35,7 +38,7 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 2
+batch_size = 8
 resize_value = 515
 resize = True
 
@@ -166,7 +169,7 @@ preprocess = torch.jit.script(transforms)
 def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,device):
        
         stride = 1
-        kernel_size = 6
+        kernel_size = 8
         patches = windows.unfold(1, kernel_size, stride)
         print(patches.shape)
         patches = windows.unfold(1, kernel_size, stride).unfold(2, kernel_size, stride)
@@ -275,17 +278,38 @@ def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,devic
                 print(preprocess_input.shape)
 
         '''
+        '''
+        Similarity has to be a tensor of size [batch_size,16,16]
+        Need to first reshape the 81 tensor to 9x9
+        '''
+        similarity = torch.zeros(batch_size,x_size,x_size).to('cpu')
+        n_of_runs = torch.zeros(batch_size,x_size,x_size).to('cpu')
+
         # 2)Then we need to compute the similarity score for each image
         for batch_index in range(batch_size):
                 
                 text_input = clip.tokenize(tok_labels[batch_index]).to(device)
                 logits_per_image, logits_per_text = clipM(preprocess_input[batch_index], text_input)
                 print(batch_index,logits_per_image.shape)
+                sim_score = logits_per_image.squeeze(1).reshape(kernel_size+1,kernel_size+1).to('cpu')
+
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                for i in range(kernel_size+1):
+                        for j in range(kernel_size+1):
+                                similarity[batch_index, i:i+kernel_size, j:j+kernel_size] += sim_score[i,j]
+                                #similarity[i:i+kernel_size,j:j+kernel_size] += logits_per_image.squeeze(1).reshape(kernel_size+1,kernel_size+1)[i,j]
+                                n_of_runs[batch_index, i:i+kernel_size, j:j+kernel_size] += 1
+
+                
+                gc.collect()
+                torch.cuda.empty_cache()
                 #similarity = torch.diagonal(logits_per_image)
 
         
 
-        return 0
+        return n_of_runs
 
 
         unfold = nn.Unfold((256,256),stride=32)
@@ -394,7 +418,10 @@ for batch in val_dl:
     #Compute the heatmap score for each kernel
     print(label)
     heatmaps_scores = bcomputeHeatmap(windowed_images, window_size, x_size,batch_size, clipM,label, device)
-    
+    print(heatmaps_scores[0])
     break
     
     
+end_execution = time.time()
+print(end_execution-start_execution)
+
