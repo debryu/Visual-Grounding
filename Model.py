@@ -30,7 +30,7 @@ torch.set_num_threads(8)
 
 #Bounding box data is bottom left x,y top right x,y 
 
-path = 'C:/Users/Mateo-drr/Documents/picklesL/'
+path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesL/'
 n_epochs = 2
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
@@ -323,6 +323,8 @@ def computeHeatmap(images,window_size,clipM,labels):
         )
     scripted_transforms = torch.jit.script(transforms)
     
+    print('WE ARE RUNNING THE RIGHT CODE UH')
+
     imagesCP = []
     heatmap = torch.zeros(imagesC.size())[:,0,:,:,:]
     text_input = clip.tokenize(list(labels)).to(device)

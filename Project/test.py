@@ -282,8 +282,8 @@ def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,devic
         Similarity has to be a tensor of size [batch_size,16,16]
         Need to first reshape the 81 tensor to 9x9
         '''
-        similarity = torch.zeros(batch_size,x_size,x_size).to('cpu')
-        n_of_runs = torch.zeros(batch_size,x_size,x_size).to('cpu')
+        similarity = torch.zeros(batch_size,x_size,x_size).to(device)
+        n_of_runs = torch.zeros(batch_size,x_size,x_size).to(device)
 
         # 2)Then we need to compute the similarity score for each image
         for batch_index in range(batch_size):
@@ -291,12 +291,13 @@ def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,devic
                 text_input = clip.tokenize(tok_labels[batch_index]).to(device)
                 logits_per_image, logits_per_text = clipM(preprocess_input[batch_index], text_input)
                 print(batch_index,logits_per_image.shape)
-                sim_score = logits_per_image.squeeze(1).reshape(kernel_size+1,kernel_size+1).to('cpu')
+                sim_score = logits_per_image.squeeze(1).reshape(kernel_size+1,kernel_size+1).to(device)
 
                 gc.collect()
                 torch.cuda.empty_cache()
-
-                for i in range(kernel_size+1):
+                # Don't store anything for now
+                with torch.no_grad():
+                    for i in range(kernel_size+1):
                         for j in range(kernel_size+1):
                                 similarity[batch_index, i:i+kernel_size, j:j+kernel_size] += sim_score[i,j]
                                 #similarity[i:i+kernel_size,j:j+kernel_size] += logits_per_image.squeeze(1).reshape(kernel_size+1,kernel_size+1)[i,j]
@@ -305,81 +306,9 @@ def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,devic
                 
                 gc.collect()
                 torch.cuda.empty_cache()
-                #similarity = torch.diagonal(logits_per_image)
-
-        
-
-        return n_of_runs
+        return similarity/n_of_runs
 
 
-        unfold = nn.Unfold((256,256),stride=32)
-        imagesC = unfold(windows)
-        imagesC = imagesC.view(4,3,256,256,81).permute(0,1,4,3,2) #chops move downwards
-        #imagesC1 = images[]
-        transforms = torch.nn.Sequential(
-                tt.Resize((224,224), antialias=True, interpolation=Image.BICUBIC),
-                tt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-                )
-        scripted_transforms = torch.jit.script(transforms)
-        
-        imagesCP = []
-        heatmap = torch.zeros(imagesC.size())[:,0,:,:,:]
-        text_input = clip.tokenize(text).to(device)
-        for i in range(0,imagesC.size()[2]):
-                #clip returns the similarity of each image with respect to all the labels
-                logits_per_image, logits_per_text = clipM(scripted_transforms(imagesC[:,:,i,:,:]), text_input)
-                similarity = torch.diagonal(logits_per_image)
-                heatmap[:,i,:,:] += similarity
-                imagesCP.append()
-        imagesCP = torch.stack(imagesCP).permute(1,2,0,3,4)
-        print(imagesCP.shape)
-
-
-        stride = 1
-        kernel_size = 6
-        #text = 'a pair of white shoes'
-        #txt_embedding = text2embedding(text)
-        text_input = clip.tokenize(text).to(device)
-        print(text_input)
-        heatmap = torch.zeros(windows.shape[1], windows.shape[2])
-        #Count how many time each window is used as a kernel, in order to normalize the results
-        # in the heatmap score
-        number_of_uses = torch.ones(windows.shape[1], windows.shape[2])
-
-        for i in range(0, windows.shape[1] - kernel_size + 1, stride):
-                for j in range(0, windows.shape[2] - kernel_size + 1, stride):
-                        #Initialize the canvas as a random noise image 
-                        canvas = torch.zeros(window_size*kernel_size, window_size*kernel_size, 3).to(device)
-                        #print(canvas.shape)
-
-                        kernel = windows[0,i:i+kernel_size,j:j+kernel_size]
-                        #print(kernel.shape)
-                        #Add each window of the kernel to the canvas
-                        for k in range(kernel.shape[1]):
-                                for l in range(kernel.shape[0]):
-                                        canvas[k*window_size:(k+1)*window_size, l*window_size:(l+1)*window_size] += kernel[k,l].permute(1,2,0)
-
-                        #plt.imshow(canvas)
-                        #plt.show()
-                        #print('original')
-                        #print(canvas.shape)
-                        canvas = canvas.permute(2,0,1)
-                        #print(canvas.shape)
-                        canvas_PIL = transforms.ToPILImage()(canvas)
-                        
-                        canvas_input = preprocess(canvas_PIL).unsqueeze(0).to(device)
-                        
-                        #Clip classification
-                        logits_per_image, logits_per_text = model(canvas_input, text_input)
-                        similarity = logits_per_image.to('cpu').item()
-                                
-
-                        heatmap[i:i+kernel_size,j:j+kernel_size] += similarity
-                        number_of_uses[i:i+kernel_size,j:j+kernel_size] += 1
-                        #print("kernel similarity:", similarity)  # prints: [[0.9927937  0.00421068 0.00299572]]
-
-        heatmap = heatmap / number_of_uses
-        return heatmap
 
 
 #Batch computing
@@ -410,15 +339,70 @@ for batch in val_dl:
     #plt.imshow(asd[0].permute(2,1,0).to('cpu'))
 
     tok_labels = clip.tokenize(label).to(device)
-    print('labels',tok_labels.shape)
+    print('shape of the labels ',tok_labels.shape)
     #Chunking the images:
     #Dimension should be [batch_size,x_size,y_size,3,window_size,window_size]
     windowed_images,x_size,y_size = bwindowize(images, window_size)
-    print(windowed_images.shape)
+    print('shape of the windowed image ', windowed_images.shape)
     #Compute the heatmap score for each kernel
     print(label)
     heatmaps_scores = bcomputeHeatmap(windowed_images, window_size, x_size,batch_size, clipM,label, device)
-    print(heatmaps_scores[0])
+    print('shape of the heatmap', heatmaps_scores.shape)
+
+    #First, put every score one after the other
+    heatmaps_scores = heatmaps_scores.reshape(batch_size,x_size**2)
+
+    normalize = True
+    if(normalize):
+        
+        tensor_mean = heatmaps_scores.mean(dim=1).unsqueeze(-1)
+        print(tensor_mean)
+        
+        heatmaps_scores = heatmaps_scores - tensor_mean
+        
+        #Decide to clip it or not
+        heatmaps_scores = heatmaps_scores.clamp(min= 0, max = float('inf'))
+        #augmented_scores = np.clip(augmented_scores-augmented_scores.mean(), 0, np.inf)
+        #augmented_scores = np.clip(augmented_scores-augmented_scores.mean(), 0, np.inf)
+        tensor_min = torch.tensor(heatmaps_scores.min(dim=1).values).unsqueeze(-1)
+        tensor_max = torch.tensor(heatmaps_scores.max(dim=1).values).unsqueeze(-1)
+        print(tensor_max)
+        print(tensor_min)
+        heatmaps_scores = (heatmaps_scores - tensor_min)/(tensor_max - tensor_min)
+
+
+    # Transform the tensor to apply the multiplication
+    heatmaps_scores = heatmaps_scores.reshape(batch_size,x_size,x_size).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    windowed_images = windowed_images*heatmaps_scores
+
+    
+    '''
+    ONLY USED FOR PLOTTING IN DEBUGGING
+    '''
+    plot = True
+    imagesToPlotx = windowed_images.shape[1]
+    imagesToPloty = windowed_images.shape[2]
+    
+
+    if(plot):
+        
+        for batch in range(batch_size):
+            print('showing batch ', batch)
+            fig, ax = plt.subplots(imagesToPlotx, imagesToPloty, figsize=(4, 4))
+            for i in range(imagesToPlotx):
+                for j in range(imagesToPloty):
+                    image_to_plot = windowed_images[batch,i,j].permute(1,2,0).to('cpu')
+                    ax[i,j].imshow(image_to_plot)
+                    ax[i,j].axis('off')
+                    ax[i,j].set_aspect('equal') 
+                    fig.subplots_adjust(wspace=0.0,hspace=0.0)
+            plt.show() 
+            #plt.pause(1)
+        #plt.show()  
+    '''
+    END OF DEBUGGING
+    '''
+
     break
     
     
