@@ -31,16 +31,17 @@ torch.set_num_threads(8)
 torch.set_num_interop_threads(8)
 
 #Bounding box data is bottom left x,y top right x,y 
+#well apparently no, its top left corner and bottom right x,y
 
 path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
-n_epochs = 10
+n_epochs = 2
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 64
+batch_size = 6
 resize = 256
 window_size=32
 
@@ -106,7 +107,7 @@ train_ds = loadData(path, 'train/')
 val_ds = loadData(path, 'val/')
 test_ds = loadData(path, 'test/')
 
-train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
+train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=True)
 val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
 test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
 
@@ -130,9 +131,9 @@ for batch in train_dl:
         plt.show()
         break
         
-    print(batch['img'].shape)
+    #print(batch['img'].shape)
     #plt.imshow(item['img'])
-    print(batch['label'])
+    #print(batch['label'])
     print(batch['bbox'])
     break
 
@@ -148,8 +149,8 @@ def loadCAE(device):
 #device = 'cpu'
     autoenc = resConvfmod()
     autoenc = autoenc.to(device)
-    autoenc.load_state_dict(torch.load(loaddir, map_location=torch.device(device)))
-    autoenc.eval()
+    #autoenc.load_state_dict(torch.load(loaddir, map_location=torch.device(device)))
+    #autoenc.eval()
     return autoenc
 
 class STEFunction(torch.autograd.Function):
@@ -198,13 +199,13 @@ class RRDB(nn.Module):
     def __init__(self, nf, gc=32):
         super(RRDB, self).__init__()
         self.RDB1 = ResidualDenseBlock_5C(nf, gc)
-        self.RDB2 = ResidualDenseBlock_5C(nf, gc)
-        self.RDB3 = ResidualDenseBlock_5C(nf, gc)
+        #self.RDB2 = ResidualDenseBlock_5C(nf, gc)
+        #self.RDB3 = ResidualDenseBlock_5C(nf, gc)
 
     def forward(self, x):
         out = self.RDB1(x)
-        out = self.RDB2(out)
-        out = self.RDB3(out)
+        #out = self.RDB2(out)
+        #out = self.RDB3(out)
         return out * 0.2 + x
 
 class ResidualDenseBlock_5C_dec(nn.Module):
@@ -424,7 +425,8 @@ class BXfinder(nn.Module):
                                 nn.GELU(),
                                 nn.Linear(8192, 2048),
                                 nn.GELU(),
-                                nn.Linear(2048, 4))
+                                nn.Linear(2048, 4),
+                                nn.Sigmoid())
         
         self.idk2 = nn.Linear(3136,1024)
         
@@ -442,7 +444,7 @@ class BXfinder(nn.Module):
         #print(x.size(), bertx.size())
         x = self.L3(x)
         #print(x.size())
-        return x
+        return x*resize
   
 #init the autoencoder    
 compress = loadCAE(device)
@@ -457,7 +459,31 @@ def final_loss(outputs, bbox):
         loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
     return loss/4
 
-
+def bb_intersection_over_union(boxA, boxB):
+	# Determine the bottom left corner of the intersection
+    intersection_bottom_left_x = torch.cat((boxA[:,0].view(batch_size,1),
+                                            boxB[:,0].view(batch_size,1)),dim=1).max(dim=1)[0]
+    intersection_bottom_left_y = torch.cat((boxA[:,1].view(batch_size,1),
+                                            boxB[:,1].view(batch_size,1)),dim=1).max(dim=1)[0]
+    # Determine the top right corner of the intersection
+    intersection_top_right_x = torch.cat((boxA[:,0].view(batch_size,1) + boxA[:,2].view(batch_size,1),
+                                          boxB[:,0].view(batch_size,1) + boxB[:,2].view(batch_size,1)),
+                                          dim=1).min(dim=1)[0]
+    intersection_top_right_y = torch.cat((boxA[:,1].view(batch_size,1) + boxA[:,3].view(batch_size,1),
+                                          boxB[:,3].view(batch_size,1) + boxB[:,3].view(batch_size,1)),
+                                          dim=1).min(dim=1)[0]
+    # Check if the boxes intersect
+    if(intersection_bottom_left_x >= intersection_top_right_x or intersection_bottom_left_y >= intersection_top_right_y):
+        return 0
+    # Compute the area of intersection, and the area of the original boxes
+    intersection_area = (intersection_top_right_x - intersection_bottom_left_x) * (intersection_top_right_y - intersection_bottom_left_y)
+    boxA_area = boxA[:,2] * boxA[:,3]
+    boxB_area = boxB[:,2] * boxB[:,3]
+    # Compute the union area by adding the area of the two boxes and subtracting the area of intersection
+    union_area = boxA_area + boxB_area - intersection_area
+    iou = intersection_area / union_area
+	# return the intersection over union value
+    return iou
   
 for epoch in range(1, n_epochs+1):
     train_loss = 0.0
@@ -465,6 +491,7 @@ for epoch in range(1, n_epochs+1):
     print(epoch)
     
     bxfinder.train()
+    compress.train()
     i=0
     for bi, data in tqdm(enumerate(train_dl), total=int(len(train_ds)/train_dl.batch_size)):
     
@@ -485,13 +512,13 @@ for epoch in range(1, n_epochs+1):
         #    pickle.dump({'img': recImgs, 'Blabel':bertLabels, 'label':label, 'bbox':bbox}, f)
             
         #i+=1    
-        with torch.no_grad():
-            latent = compress.encoder(recImgs)
+        
+        latent = compress.encoder(recImgs)
 #'''    
-        latent.requires_grad = True
+        #latent.requires_grad = True
      
         outputs = bxfinder(latent, bertLabels.to(device))
-        loss = final_loss(outputs, bbox)
+        loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
         #print(outputs)
         optimizer.zero_grad()
         loss.backward()        
@@ -508,6 +535,7 @@ for epoch in range(1, n_epochs+1):
 
 
     bxfinder.eval()
+    compress.eval()
     with torch.no_grad():
         for bi, data in tqdm(enumerate(val_dl), total=int(len(val_ds)/val_dl.batch_size)):
         #for data in val_dl:
@@ -523,7 +551,7 @@ for epoch in range(1, n_epochs+1):
            
             outputs = bxfinder(latent, bertLabels.to(device))
             
-            loss = final_loss(outputs, bbox)
+            loss = loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
             val_loss += loss.item()*images.size(0)
             #break
         val_loss = val_loss/len(val_dl)

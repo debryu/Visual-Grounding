@@ -32,7 +32,7 @@ torch.set_num_interop_threads(8)
 
 #Bounding box data is bottom left x,y top right x,y 
 
-path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
+path = 'C:/Users/Mateo-drr/Documents/picklesL/'
 n_epochs = 10
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
@@ -40,7 +40,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 128
+batch_size = 1
 resize = 512
 window_size=32
 
@@ -115,7 +115,7 @@ train_ds = loadData(path, 'train/')
 val_ds = loadData(path, 'val/')
 test_ds = loadData(path, 'test/')
 
-train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
+train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=True)
 val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
 test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
 
@@ -377,7 +377,7 @@ for epoch in range(1, n_epochs+1):
         recImgs, bertLabels = preprocessing(images, label)
         
         recImgs,bertLabels,label,bbox =recImgs.to('cpu'),bertLabels.to('cpu'),label,bbox.to('cpu') 
-        with open(path+'sim/test/'+test_ds[i][-28:], 'wb') as f:
-            pickle.dump({'img': recImgs, 'Blabel':bertLabels, 'label':label, 'bbox':bbox}, f)
+        #with open(path+'sim/test/'+test_ds[i][-28:], 'wb') as f:
+        #    pickle.dump({'img': recImgs, 'Blabel':bertLabels, 'label':label, 'bbox':bbox}, f)
             
-        i+=1    
+        #i+=1    
