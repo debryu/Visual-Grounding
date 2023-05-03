@@ -25,6 +25,7 @@ import matplotlib.patches as patches
 from transformers import BertTokenizer, BertModel
 import gc
 from torchvision import transforms
+import torchvision.ops as tvo
 
 torch.backends.cudnn.benchmark = True 
 torch.set_num_threads(8)
@@ -37,7 +38,7 @@ path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
 n_epochs = 2
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device ='cpu'#"cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
@@ -454,10 +455,16 @@ bxfinder.to(device)
 optimizer = torch.optim.AdamW(bxfinder.parameters(), lr=init_lr)  
 
 def final_loss(outputs, bbox):
-    loss = 0
-    for i in range(0,4):
-        loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
-    return loss/4
+    #loss = 0
+    #for i in range(0,4):
+    #    loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
+    #return loss/4
+    boxA,boxB = outputs.clone(), bbox.clone()
+    boxA[:,2] = boxA[:,0]+boxA[:,2]
+    boxA[:,3] = boxA[:,1]+boxA[:,3]
+    boxB[:,2] = boxB[:,0]+boxB[:,2]
+    boxB[:,3] = boxB[:,1]+boxB[:,3]
+    return tvo.generalized_box_iou_loss(boxA,boxB)
 
 def bb_intersection_over_union(boxA, boxB):
 	# Determine the bottom left corner of the intersection
