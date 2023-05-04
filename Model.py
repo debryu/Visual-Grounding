@@ -15,15 +15,8 @@ from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import torchvision.transforms as tt
 from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
-from PIL import Image
 from tqdm import tqdm
 import pickle
-import copy
-from matplotlib.patches import Rectangle
-import clip
-import matplotlib.patches as patches
-from transformers import BertTokenizer, BertModel
-import gc
 from torchvision import transforms
 import torchvision.ops as tvo
 
@@ -36,13 +29,13 @@ torch.set_num_interop_threads(8)
 
 path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
 n_epochs = 2
-init_lr = 0.0009
+init_lr = 0.00001
 clipping_value = 1 #gradient clip
-device ='cpu'#"cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 6
+batch_size = 56
 resize = 256
 window_size=32
 
@@ -108,7 +101,7 @@ train_ds = loadData(path, 'train/')
 val_ds = loadData(path, 'val/')
 test_ds = loadData(path, 'test/')
 
-train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=True)
+train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
 val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
 test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
 
@@ -411,9 +404,9 @@ class BXfinder(nn.Module):
                                 nn.GELU(),
                                 )
         
-        self.L2 = nn.Sequential(nn.Linear(768, 256),
+        self.L2 = nn.Sequential(nn.Linear(768, 1024),
                                 nn.GELU(),
-                                nn.Linear(256, 768),
+                                nn.Linear(1024, 768),
                                 nn.GELU(),
                                 )
         self.L3 = nn.Sequential(nn.Linear(1536, 4096),
@@ -427,7 +420,8 @@ class BXfinder(nn.Module):
                                 nn.Linear(8192, 2048),
                                 nn.GELU(),
                                 nn.Linear(2048, 4),
-                                nn.Sigmoid())
+                                nn.Sigmoid()
+                                )
         
         self.idk2 = nn.Linear(3136,1024)
         
@@ -445,7 +439,7 @@ class BXfinder(nn.Module):
         #print(x.size(), bertx.size())
         x = self.L3(x)
         #print(x.size())
-        return x*resize
+        return x*(resize-1)#torch.clip(x,0,1)*resize
   
 #init the autoencoder    
 compress = loadCAE(device)
@@ -455,42 +449,22 @@ bxfinder.to(device)
 optimizer = torch.optim.AdamW(bxfinder.parameters(), lr=init_lr)  
 
 def final_loss(outputs, bbox):
-    #loss = 0
-    #for i in range(0,4):
-    #    loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
+    loss = 0
+    for i in range(0,4):
+        loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
     #return loss/4
+    '''
     boxA,boxB = outputs.clone(), bbox.clone()
     boxA[:,2] = boxA[:,0]+boxA[:,2]
     boxA[:,3] = boxA[:,1]+boxA[:,3]
     boxB[:,2] = boxB[:,0]+boxB[:,2]
     boxB[:,3] = boxB[:,1]+boxB[:,3]
-    return tvo.generalized_box_iou_loss(boxA,boxB)
+    '''
+    l1 = tvo.generalized_box_iou_loss(outputs,bbox,reduction='mean')
+    l2 = loss/4
+    
+    return torch.sqrt(l1*l2)
 
-def bb_intersection_over_union(boxA, boxB):
-	# Determine the bottom left corner of the intersection
-    intersection_bottom_left_x = torch.cat((boxA[:,0].view(batch_size,1),
-                                            boxB[:,0].view(batch_size,1)),dim=1).max(dim=1)[0]
-    intersection_bottom_left_y = torch.cat((boxA[:,1].view(batch_size,1),
-                                            boxB[:,1].view(batch_size,1)),dim=1).max(dim=1)[0]
-    # Determine the top right corner of the intersection
-    intersection_top_right_x = torch.cat((boxA[:,0].view(batch_size,1) + boxA[:,2].view(batch_size,1),
-                                          boxB[:,0].view(batch_size,1) + boxB[:,2].view(batch_size,1)),
-                                          dim=1).min(dim=1)[0]
-    intersection_top_right_y = torch.cat((boxA[:,1].view(batch_size,1) + boxA[:,3].view(batch_size,1),
-                                          boxB[:,3].view(batch_size,1) + boxB[:,3].view(batch_size,1)),
-                                          dim=1).min(dim=1)[0]
-    # Check if the boxes intersect
-    if(intersection_bottom_left_x >= intersection_top_right_x or intersection_bottom_left_y >= intersection_top_right_y):
-        return 0
-    # Compute the area of intersection, and the area of the original boxes
-    intersection_area = (intersection_top_right_x - intersection_bottom_left_x) * (intersection_top_right_y - intersection_bottom_left_y)
-    boxA_area = boxA[:,2] * boxA[:,3]
-    boxB_area = boxB[:,2] * boxB[:,3]
-    # Compute the union area by adding the area of the two boxes and subtracting the area of intersection
-    union_area = boxA_area + boxB_area - intersection_area
-    iou = intersection_area / union_area
-	# return the intersection over union value
-    return iou
   
 for epoch in range(1, n_epochs+1):
     train_loss = 0.0
@@ -506,8 +480,10 @@ for epoch in range(1, n_epochs+1):
         
         images = images.to(device)
         bbox = bbox.to(device)
+        bbox[:,2] = bbox[:,0]+bbox[:,2]
+        bbox[:,3] = bbox[:,1]+bbox[:,3]
         
-        mask = torch.mean(images, dim=1, keepdim=True)
+        #mask = torch.mean(images, dim=1, keepdim=True)
         
         
         #recImgs, bertLabels = preprocessing(images, label)
@@ -525,7 +501,7 @@ for epoch in range(1, n_epochs+1):
         #latent.requires_grad = True
      
         outputs = bxfinder(latent, bertLabels.to(device))
-        loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
+        loss = final_loss(outputs, bbox)
         #print(outputs)
         optimizer.zero_grad()
         loss.backward()        
@@ -533,10 +509,15 @@ for epoch in range(1, n_epochs+1):
         optimizer.step()
         train_loss += loss.item()*images.size(0)
         #break
+        
+        #if i%10 == 0:
+        #    print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
+        
+        i+=1
     
     train_loss = train_loss/len(train_dl)
     print('E: {} T Loss: {:.3f}'.format(epoch, train_loss) + " %" + "{:.3}".format(np.exp(-abs(train_loss))*100))
-    print(outputs.transpose(0,1)[0][0:2], bbox.transpose(0,1)[0][0:2])
+    print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
     if epoch%save_freq == 0:
         torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
 
@@ -549,6 +530,8 @@ for epoch in range(1, n_epochs+1):
             images,label,bbox = data['img'], data['label'], data['bbox']
             images = images.to(device)
             bbox = bbox.to(device)
+            bbox[:,2] = bbox[:,0]+bbox[:,2]
+            bbox[:,3] = bbox[:,1]+bbox[:,3]
             
             recImgs = images
             bertLabels = data['blabel']
@@ -558,11 +541,11 @@ for epoch in range(1, n_epochs+1):
            
             outputs = bxfinder(latent, bertLabels.to(device))
             
-            loss = loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
+            loss = loss = final_loss(outputs, bbox)
             val_loss += loss.item()*images.size(0)
             #break
         val_loss = val_loss/len(val_dl)
         print('E: {} V Loss: {:.3f}'.format(epoch, val_loss) + " %" + "{:.3}".format(np.exp(-abs(val_loss))*100))
-        print(outputs.transpose(0,1)[0][0:2], bbox.transpose(0,1)[0][0:2])
+        print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
         
 #'''
