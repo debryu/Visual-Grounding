@@ -23,27 +23,38 @@ from matplotlib.patches import Rectangle
 import clip
 import matplotlib.patches as patches
 from transformers import BertTokenizer, BertModel
+import gc
+from torchvision import transforms
+import torchvision.ops as tvo
 
 torch.backends.cudnn.benchmark = True 
 torch.set_num_threads(8)
-
+torch.set_num_interop_threads(8)
 
 #Bounding box data is bottom left x,y top right x,y 
+#well apparently no, its top left corner and bottom right x,y
 
-path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesL/'
+path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
 n_epochs = 2
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device ='cpu'#"cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 4
-resize = 512
+batch_size = 6
+resize = 256
 window_size=32
+
+toTensor = transforms.ToTensor()
 
 stride = 1
 kernel_size =8
+plot = False
+
+#encoder
+numc=4
+loaddir = "D:/MachineLearning/RinRUnpix/finalOptions/"+str(numc)+'/UtMq-cprQ2-clipint8-to0-fmod/autoenc00115.pth'
 
 
 def loadData(path,split):
@@ -55,8 +66,8 @@ def loadData(path,split):
         dataset.append(file_path)
     return dataset
      
-
-class CustomDataset(Dataset):
+    
+class CustomDatasetPP(Dataset):
 
     def __init__(self, data):
     #WHAT DO WE PUT HERE?
@@ -73,33 +84,19 @@ class CustomDataset(Dataset):
         with open(self.data[idx], 'rb') as file:             
             data = pickle.load(file)
             if True:#data['img']['mode'] == 'RGB': TODO   
-                label = [data['label']['sentences'][0]['raw']] #take the first label raw
-                annotation = data['annotation']['bbox']
-                img = Image.frombytes(data['img']['mode'],
-                                      data['img']['size'],
-                                      data['img']['pixels'])
-                
-                img = np.transpose(np.array(img, dtype=np.float32)/255)
-                if img.shape[0] != 3:
-                    img = np.repeat(img[np.newaxis, :,:],3,axis=0)
-                img = torch.tensor(img)
-                transform = tt.Resize((resize,resize), interpolation=tt.InterpolationMode.BICUBIC, antialias=True)
-                img = transform(img)
-                #img = F.Resize(img, 224,interpolation=tt.InterpolationMode.BICUBIC)
-                rsize = [data['img']['size'][0]/img.size()[1],
-                         data['img']['size'][1]/img.size()[2]]
-                bbox = [annotation[0]/rsize[0], annotation[1]/rsize[1],
-                        annotation[2]/rsize[0], annotation[3]/rsize[1]]
+                label = data['label'] #take the first label raw
+                bbox = data['bbox']*resize/512
+                img = F.interpolate(data['img'], (resize,resize), mode='bicubic', antialias=True)
+                blabel = data['Blabel']
 
-        #decode = self.tokenizer.convert_ids_to_tokens(encoding_text['input_ids'].flatten())
-
-        return {'img':img,
+        return {'img':img[0],
               'label':label,
-              'bbox':torch.tensor(bbox)}
+              'blabel':blabel[0],
+              'bbox':bbox[0]}
 
 #CREATE THE DATALOADER
 def create_data_loader_CustomDataset(data, batch_size, eval=False):
-    ds = CustomDataset(data=data)
+    ds = CustomDatasetPP(data=data)
 
     if not eval:
         return DataLoader(ds, batch_size=batch_size, shuffle=True), len(ds)
@@ -111,23 +108,16 @@ train_ds = loadData(path, 'train/')
 val_ds = loadData(path, 'val/')
 test_ds = loadData(path, 'test/')
 
-train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
+train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=True)
 val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
 test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
 
 
-#yoloM = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, trust_repo='check') #ans yes
-#yoloM.to(device)
-    
-clipM, preprocess = clip.load("RN50", device=device)
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bertM = BertModel.from_pretrained("bert-base-uncased")
-
-
+#'''
 for batch in train_dl:
     for i,image in enumerate(batch['img']):
         print(image.shape)
-        image = image.permute(2,1,0)
+        image = image.squeeze(0).permute(2,1,0)
         fig, ax = plt.subplots()
 
         ax.imshow(image)
@@ -140,10 +130,11 @@ for batch in train_dl:
         rect = plt.Rectangle((x_down, y_down), w, h, linewidth=1, edgecolor='r', facecolor='none',alpha=0.3,color='r')
         ax.add_patch(rect)
         plt.show()
+        break
         
-    print(batch['img'].shape)
+    #print(batch['img'].shape)
     #plt.imshow(item['img'])
-    print(batch['label'])
+    #print(batch['label'])
     print(batch['bbox'])
     break
 
@@ -153,6 +144,197 @@ def conv(ni, nf, ks=3, stride=1, padding=1, **kwargs):
     _conv = nn.Conv2d(ni, nf, kernel_size=ks,stride=stride,padding=padding, **kwargs)
     nn.init.kaiming_normal_(_conv.weight, mode='fan_out')
     return _conv
+
+## ############################################################################
+def loadCAE(device):
+#device = 'cpu'
+    autoenc = resConvfmod()
+    autoenc = autoenc.to(device)
+    #autoenc.load_state_dict(torch.load(loaddir, map_location=torch.device(device)))
+    #autoenc.eval()
+    return autoenc
+
+class STEFunction(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, input):
+        lquant = torch.quantize_per_tensor(input, 0.01, 0, dtype=torch.qint8) #3 8 decimals
+        unqlat = torch.dequantize(lquant)
+        return unqlat
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        #return F.hardtanh(grad_output)
+        return grad_output
+
+class StraightThroughEstimator(nn.Module):
+    def __init__(self):
+        super(StraightThroughEstimator, self).__init__()
+
+    def forward(self, x):
+        x = STEFunction.apply(x)
+        return x
+
+class ResidualDenseBlock_5C(nn.Module):
+    def __init__(self, nf=64, gc=32, bias=True):
+        super(ResidualDenseBlock_5C, self).__init__()
+        # gc: growth channel, i.e. intermediate channels
+        self.conv1 = nn.Conv2d(nf, gc, 3, 1, 1, bias=bias)
+        self.conv2 = nn.Conv2d(nf + gc, gc, 3, 1, 1, bias=bias)
+        self.conv3 = nn.Conv2d(nf + 2 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv4 = nn.Conv2d(nf + 3 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv5 = nn.Conv2d(nf + 4 * gc, nf, 3, 1, 1, bias=bias)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+    def forward(self, x):
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
+        x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+        return x5 * 0.2 + x
+
+class RRDB(nn.Module):
+    '''Residual in Residual Dense Block'''
+
+    def __init__(self, nf, gc=32):
+        super(RRDB, self).__init__()
+        self.RDB1 = ResidualDenseBlock_5C(nf, gc)
+        #self.RDB2 = ResidualDenseBlock_5C(nf, gc)
+        #self.RDB3 = ResidualDenseBlock_5C(nf, gc)
+
+    def forward(self, x):
+        out = self.RDB1(x)
+        #out = self.RDB2(out)
+        #out = self.RDB3(out)
+        return out * 0.2 + x
+
+class ResidualDenseBlock_5C_dec(nn.Module):
+    def __init__(self, nf=64, gc=32, bias=True):
+        super(ResidualDenseBlock_5C_dec, self).__init__()
+        # gc: growth channel, i.e. intermediate channels
+        self.conv1 = nn.ConvTranspose2d(nf, gc, 3, 1, 1, bias=bias)
+        self.conv2 = nn.ConvTranspose2d(nf + gc, gc, 3, 1, 1, bias=bias)
+        self.conv3 = nn.ConvTranspose2d(nf + 2 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv4 = nn.ConvTranspose2d(nf + 3 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv5 = nn.ConvTranspose2d(nf + 4 * gc, nf, 3, 1, 1, bias=bias)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        # initialization
+        # mutil.initialize_weights([self.conv1, self.conv2, self.conv3, self.conv4, self.conv5], 0.1)
+
+    def forward(self, x):
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
+        x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+        return x5 * 0.2 + x
+
+class RRDB_dec(nn.Module):
+    '''Residual in Residual Dense Block'''
+
+    def __init__(self, nf, gc=32):
+        super(RRDB_dec, self).__init__()
+        self.RDB1 = ResidualDenseBlock_5C_dec(nf, gc)
+        self.RDB2 = ResidualDenseBlock_5C_dec(nf, gc)
+        self.RDB3 = ResidualDenseBlock_5C_dec(nf, gc)
+
+    def forward(self, x):
+        out = self.RDB1(x)
+        out = self.RDB2(out)
+        out = self.RDB3(out)
+        return out * 0.2 + x
+
+class resConvfmod(nn.Module):
+    def __init__(self):
+        super(resConvfmod, self).__init__()
+        
+        self.enc1 = nn.Sequential(conv(3, 16, 3, 1, 1,padding_mode='reflect'),
+                                  nn.LeakyReLU(),
+                                  nn.PixelUnshuffle(2),
+                                  )
+        self.enc2 = nn.Sequential(nn.Conv2d(64, 32, 3, 1, 1,padding_mode='reflect'),
+                                  nn.PixelUnshuffle(2),
+                                  )
+        self.RinR = RRDB(nf=128, gc=256)
+
+        #latent
+        self.enc3 = nn.Sequential(nn.Conv2d(128, int(numc/4), 3, 1, 1,padding_mode='reflect'),
+                                  nn.PixelUnshuffle(2),
+                                  )
+
+        self.lat = StraightThroughEstimator()
+        
+        #DEC
+        self.px1 = nn.Sequential(nn.Conv2d(numc, 512, 3, stride=1, padding=1, padding_mode='reflect'), 
+                                 nn.PixelShuffle(2)
+                                 )
+        
+        self.RinRdec = RRDB_dec(nf=128, gc=256)
+
+        self.px2 = nn.Sequential(conv(128, 256, 3, stride=1, padding=1,padding_mode='reflect'), 
+                                 nn.PixelShuffle(2),
+                                 nn.LeakyReLU()
+                                 )
+        
+        
+        self.px3 = nn.Sequential(conv(64, 12, 3, stride=1, padding=1,padding_mode='reflect'),
+                                 nn.PixelShuffle(2),
+                                 )
+        
+        #CPR
+        self.ecpr = nn.Sequential(nn.Conv2d(3, 16, 3, 1, 1,padding_mode='reflect'),
+                                  nn.PixelUnshuffle(2),
+                                  nn.PixelUnshuffle(2),
+                                  nn.PixelUnshuffle(2),
+                                  nn.Conv2d(1024, numc, 3, 1, 1,padding_mode='reflect'),
+                                  )
+        self.dcpr = nn.Sequential(nn.Conv2d(numc, 192, 3, stride=1, padding=1, padding_mode='reflect'), 
+                                  nn.PixelShuffle(2),
+                                  nn.PixelShuffle(2),
+                                  nn.PixelShuffle(2),
+                                  )
+        
+        self.ecpr2 = nn.Sequential(nn.Conv2d(64, 32, 3, 1, 1,padding_mode='reflect'),
+                                  nn.PixelUnshuffle(2),
+                                  nn.PixelUnshuffle(2),
+                                  nn.Conv2d(512, numc, 3, 1, 1,padding_mode='reflect')
+                                  )
+        self.dcpr2 = nn.Sequential(nn.Conv2d(numc, 192, 3, stride=1, padding=1, padding_mode='reflect'), 
+                                  nn.PixelShuffle(2),
+                                  nn.PixelShuffle(2),
+                                  nn.Conv2d(12, 64, 3, stride=1, padding=1, padding_mode='reflect'), 
+                                  )
+        
+    def encoder(self,x):
+        oute = self.enc1(x)     
+        x = self.ecpr(x) + self.ecpr2(oute)
+
+        oute = self.enc2(oute)
+        oute = self.RinR(oute)
+        latent = self.enc3(oute)
+        cpr = 0.2*x
+        unqlat = self.lat(latent + cpr)
+
+        return unqlat
+        
+    def decoder(self,unqlat):
+        outd = self.px1(unqlat)
+        x = self.dcpr2(unqlat)
+        unqlat = self.dcpr(unqlat)
+
+        outd = self.RinRdec(outd)
+        outd = self.px2(outd) + 0.2*x
+        out = self.px3(outd) + 0.2*unqlat 
+        out = out.clamp(0,1)
+        return out
+    
+    def forward(self,x):
+        unqlat = self.encoder(x)
+        out = self.decoder(unqlat)
+        return out, unqlat
+###############################################################################
 
 class BXfinder(nn.Module):
     def __init__(self):
@@ -221,7 +403,7 @@ class BXfinder(nn.Module):
                                   nn.GELU(),
                                   )
         self.flat = nn.Flatten()
-        self.L1 = nn.Sequential(nn.Linear(16384, 4096),
+        self.L1 = nn.Sequential(nn.Linear(4096, 4096),
                                 nn.GELU(),
                                 nn.Linear(4096, 1024),
                                 nn.GELU(),
@@ -231,185 +413,84 @@ class BXfinder(nn.Module):
         
         self.L2 = nn.Sequential(nn.Linear(768, 256),
                                 nn.GELU(),
-                                nn.Linear(256, 128),
+                                nn.Linear(256, 768),
                                 nn.GELU(),
                                 )
-        self.L3 = nn.Sequential(nn.Linear(128, 32),
+        self.L3 = nn.Sequential(nn.Linear(1536, 4096),
                                 nn.GELU(),
-                                nn.Linear(32, 4))
+                                nn.Linear(4096, 8192),
+                                nn.GELU(),
+                                nn.Linear(8192, 8192),
+                                nn.GELU(),
+                                nn.Linear(8192, 8192),
+                                nn.GELU(),
+                                nn.Linear(8192, 2048),
+                                nn.GELU(),
+                                nn.Linear(2048, 4),
+                                nn.Sigmoid())
         
         self.idk2 = nn.Linear(3136,1024)
         
     def forward(self,x, bertx):
-        x = self.down(x)
+        #x = self.down(x)
+        #print(x.size())
         x = self.flat(x)
+        #print(x.size())
         x = self.L1(x)
-        
+        #print(x.size())
         x = self.L2(x)
+        #print(x.size(), bertx.size())
         bertx = self.L2(bertx)
-        
-        x = self.L3(x + bertx)
-        return x
+        x = torch.cat((x, bertx), dim=1)
+        #print(x.size(), bertx.size())
+        x = self.L3(x)
+        #print(x.size())
+        return x*resize
   
+#init the autoencoder    
+compress = loadCAE(device)
+
 bxfinder = BXfinder();
 bxfinder.to(device)
 optimizer = torch.optim.AdamW(bxfinder.parameters(), lr=init_lr)  
 
 def final_loss(outputs, bbox):
-    loss = 0
-    for i in range(0,4):
-        loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
-    return loss/4
+    #loss = 0
+    #for i in range(0,4):
+    #    loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
+    #return loss/4
+    boxA,boxB = outputs.clone(), bbox.clone()
+    boxA[:,2] = boxA[:,0]+boxA[:,2]
+    boxA[:,3] = boxA[:,1]+boxA[:,3]
+    boxB[:,2] = boxB[:,0]+boxB[:,2]
+    boxB[:,3] = boxB[:,1]+boxB[:,3]
+    return tvo.generalized_box_iou_loss(boxA,boxB)
 
-def windowize(image,window_size):
-        windows  = image.unsqueeze(0).permute(0,2,3,1)
-        #print(windows.shape)
-        windows = windows.unfold(1,window_size,window_size)
-        #print(windows.shape)
-        x = windows.shape[1]
-        windows = windows.unfold(2,window_size,window_size)
-        #print(windows.shape)
-        y = windows.shape[2]
-        #print(y)
-        '''
-        fig, ax = plt.subplots(x, y, figsize=(2*y, 2*x))
-        for i in range(y):
-                for j in range(x):
-                        ax[j,i].imshow(windows[0,i,j].permute(2,1,0))
-                        ax[j,i].axis('off')
-
-        fig.tight_layout()
-        plt.show()
-        '''
-        return windows,x,y
-    
-def bwindowize(image,window_size):
-        windows  = image.permute(0,2,3,1)
-        #print(windows.shape)
-        windows = windows.unfold(1,window_size,window_size)
-        #print(windows.shape)
-        x = windows.shape[1]
-        windows = windows.unfold(2,window_size,window_size)
-        #print(windows.shape)
-        y = windows.shape[2]
-        #print(y)
-        '''
-        fig, ax = plt.subplots(x, y, figsize=(2*y, 2*x))
-        for i in range(y):
-                for j in range(x):
-                        ax[j,i].imshow(windows[0,i,j].permute(2,1,0))
-                        ax[j,i].axis('off')
-
-        fig.tight_layout()
-        plt.show()
-        '''
-        return windows,x,y
-    
-def computeHeatmap(images,window_size,clipM,labels):
-
-    chops = int(resize/window_size)
-    #recImgs = chunks.permute(0,3,2,5,1,4) # [1,16a,16b,3,32,32] -> [1,3,16b,32,16a,32]
-    #recImgs = recImgs.reshape(batch_size,3,512,512)
-    #plt.imshow(a.permute(2,1,0).to('cpu'))
-    
-        
-    unfold = nn.Unfold((256,256),stride=32)
-    imagesC = unfold(images)
-    imagesC = imagesC.view(4,3,256,256,81).permute(0,1,4,3,2) #chops move downwards
-    #imagesC1 = images[]
-    transforms = torch.nn.Sequential(
-        tt.Resize((224,224), antialias=True, interpolation=Image.BICUBIC),
-        tt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-        )
-    scripted_transforms = torch.jit.script(transforms)
-    
-    print('WE ARE RUNNING THE RIGHT CODE UH')
-
-    imagesCP = []
-    heatmap = torch.zeros(imagesC.size())[:,0,:,:,:]
-    text_input = clip.tokenize(list(labels)).to(device)
-    for i in range(0,imagesC.size()[2]):
-        #clip returns the similarity of each image with respect to all the labels
-        logits_per_image, logits_per_text = clipM(scripted_transforms(imagesC[:,:,i,:,:]), text_input)
-        similarity = torch.diagonal(logits_per_image)
-        heatmap[:,i,:,:] += similarity
-        imagesCP.append()
-    imagesCP = torch.stack(imagesCP).permute(1,2,0,3,4)
-
-def computeHeatmap(windows,window_size,model,text,device):
-    stride = 1 # moves window_size pixels
-    kernel_size = 8 #merge n number of chunks
-    #text = 'a pair of white shoes'
-    #txt_embedding = text2embedding(text)
-    text_input = clip.tokenize([text]).to(device)
-
-    heatmap = torch.zeros(windows.shape[1], windows.shape[2])
-    #Count how many time each window is used as a kernel, in order to normalize the results
-    # in the heatmap score
-    number_of_uses = torch.ones(windows.shape[1], windows.shape[2])
-
-    for i in range(0, windows.shape[1] - kernel_size + 1, stride):
-            for j in range(0, windows.shape[2] - kernel_size + 1, stride):
-                    #Initialize the canvas as a random noise image 
-                    canvas = torch.zeros(window_size*kernel_size, window_size*kernel_size, 3).to(device)
-                    #print(canvas.shape)
-
-                    kernel = windows[0,i:i+kernel_size,j:j+kernel_size]
-                    #print(kernel.shape)
-                    #Add each window of the kernel to the canvas
-                    for k in range(kernel.shape[1]):
-                            for l in range(kernel.shape[0]):
-                                    canvas[k*window_size:(k+1)*window_size, l*window_size:(l+1)*window_size] += kernel[k,l].permute(1,2,0)
-
-                    #plt.imshow(canvas)
-                    #plt.show()
-                    #print('original')
-                    #print(canvas.shape)
-                    canvas = canvas.permute(2,0,1)
-                    #print(canvas.shape)
-                    canvas_PIL = tt.ToPILImage()(canvas)
-                    
-                    canvas_input = preprocess(canvas_PIL).unsqueeze(0).to(device)
-                    
-                    #Clip classification
-                    logits_per_image, logits_per_text = model(canvas_input, text_input)
-                    similarity = logits_per_image.to('cpu').item()
-                            
-
-                    heatmap[i:i+kernel_size,j:j+kernel_size] += similarity
-                    number_of_uses[i:i+kernel_size,j:j+kernel_size] += 1
-                    #print("kernel similarity:", similarity)  # prints: [[0.9927937  0.00421068 0.00299572]]
-
-    heatmap = heatmap / number_of_uses
-    return heatmap
-
-def getHeatmap(windows,hm_scores,x,y, plot = False):
-        augmented_scores = (hm_scores-hm_scores.mean()).to(device)
-        #if lvl > 0:   
-        #    augmented_scores = augmented_scores-augmented_scores.mean()
-            #augmented_scores = np.clip(augmented_scores-augmented_scores.mean(), 0, np.inf)
-        augmented_scores = (augmented_scores - augmented_scores.min())/(augmented_scores.max() - augmented_scores.min())
-
-        #Make a copy of the tensor
-        hm = windows.squeeze(0)
-        #print(hm.shape)
-        hm = hm.permute(3,4,0,1,2)
-        hm = hm.permute(0,1,4,2,3)
-        hm = hm*augmented_scores
-        hm = hm.permute(3,4,2,0,1).unsqueeze(0)
-        if(plot):
-                fig, ax = plt.subplots(x, y, figsize=(0.5*y, 0.5*x))
-                for i in range(y):
-                        for j in range(x):
-                                ax[j,i].imshow(hm[0,i,j].permute(2,1,0))
-                                ax[j,i].axis('off')
-                                ax[j,i].set_aspect('equal')
-
-                fig.subplots_adjust(wspace=0.0,hspace=0.0)
-                plt.show()
-        return hm
-    
-
+def bb_intersection_over_union(boxA, boxB):
+	# Determine the bottom left corner of the intersection
+    intersection_bottom_left_x = torch.cat((boxA[:,0].view(batch_size,1),
+                                            boxB[:,0].view(batch_size,1)),dim=1).max(dim=1)[0]
+    intersection_bottom_left_y = torch.cat((boxA[:,1].view(batch_size,1),
+                                            boxB[:,1].view(batch_size,1)),dim=1).max(dim=1)[0]
+    # Determine the top right corner of the intersection
+    intersection_top_right_x = torch.cat((boxA[:,0].view(batch_size,1) + boxA[:,2].view(batch_size,1),
+                                          boxB[:,0].view(batch_size,1) + boxB[:,2].view(batch_size,1)),
+                                          dim=1).min(dim=1)[0]
+    intersection_top_right_y = torch.cat((boxA[:,1].view(batch_size,1) + boxA[:,3].view(batch_size,1),
+                                          boxB[:,3].view(batch_size,1) + boxB[:,3].view(batch_size,1)),
+                                          dim=1).min(dim=1)[0]
+    # Check if the boxes intersect
+    if(intersection_bottom_left_x >= intersection_top_right_x or intersection_bottom_left_y >= intersection_top_right_y):
+        return 0
+    # Compute the area of intersection, and the area of the original boxes
+    intersection_area = (intersection_top_right_x - intersection_bottom_left_x) * (intersection_top_right_y - intersection_bottom_left_y)
+    boxA_area = boxA[:,2] * boxA[:,3]
+    boxB_area = boxB[:,2] * boxB[:,3]
+    # Compute the union area by adding the area of the two boxes and subtracting the area of intersection
+    union_area = boxA_area + boxB_area - intersection_area
+    iou = intersection_area / union_area
+	# return the intersection over union value
+    return iou
   
 for epoch in range(1, n_epochs+1):
     train_loss = 0.0
@@ -417,40 +498,34 @@ for epoch in range(1, n_epochs+1):
     print(epoch)
     
     bxfinder.train()
+    compress.train()
+    i=0
     for bi, data in tqdm(enumerate(train_dl), total=int(len(train_ds)/train_dl.batch_size)):
+    
         images,label,bbox = data['img'], data['label'][0], data['bbox']
+        
         images = images.to(device)
         bbox = bbox.to(device)
         
-        #Chunking the images:
-        heatmaps = torch.zeros(batch_size,16,16,3,window_size,window_size)
-
-        bertLabels = torch.zeros(batch_size,768)
-        windowed_images,x_size,y_size = bwindowize(images, window_size)
+        mask = torch.mean(images, dim=1, keepdim=True)
         
-        for i,image in enumerate(windowed_images):
-            #windowed_images,x_size,y_size = windowize(image,window_size)
-            image = image.unsqueeze(0)
-            hm_scores = computeHeatmap(image,window_size,clipM,label[i],device)
-            #getHeatmap(windowed_images,hm_scores,x_size,y_size)
-            heatmaps[i] = getHeatmap(image,hm_scores,x_size,y_size,plot = False)
+        
+        #recImgs, bertLabels = preprocessing(images, label)
+        recImgs = images
+        bertLabels = data['blabel']
+        
+        #recImgs,bertLabels,label,bbox =recImgs.to('cpu'),bertLabels.to('cpu'),label,bbox.to('cpu') 
+        #with open(path+'sim/test/'+test_ds[i][-28:], 'wb') as f:
+        #    pickle.dump({'img': recImgs, 'Blabel':bertLabels, 'label':label, 'bbox':bbox}, f)
             
+        #i+=1    
         
-            #Encode label with bert
-            encoded_input = tokenizer(label[i], return_tensors='pt')
-            output = bertM(**encoded_input).last_hidden_state[0][0] #768 size
-            bertLabels[i] = output
-        #outputs = torch.tensor(outputs)
-        
-        
-        #Rebuild chunks into images
-        recImgs = heatmaps.permute(0,3,2,5,1,4) # [1,16a,16b,3,32,32] -> [1,3,16b,32,16a,32]
-        recImgs = recImgs.reshape(batch_size,3,512,512)
-        #print(output.size(), heatmaps.size(), bertLabels.size(), recImgs.size())
-
-       
-        outputs = bxfinder(images, bertLabels.to(device))
-        loss = final_loss(outputs, bbox)
+        latent = compress.encoder(recImgs)
+#'''    
+        #latent.requires_grad = True
+     
+        outputs = bxfinder(latent, bertLabels.to(device))
+        loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
         #print(outputs)
         optimizer.zero_grad()
         loss.backward()        
@@ -458,15 +533,16 @@ for epoch in range(1, n_epochs+1):
         optimizer.step()
         train_loss += loss.item()*images.size(0)
         #break
-      
+    
     train_loss = train_loss/len(train_dl)
     print('E: {} T Loss: {:.3f}'.format(epoch, train_loss) + " %" + "{:.3}".format(np.exp(-abs(train_loss))*100))
-    print(outputs.transpose(0,1)[0][0:3], bbox.transpose(0,1)[0][0:3])
+    print(outputs.transpose(0,1)[0][0:2], bbox.transpose(0,1)[0][0:2])
     if epoch%save_freq == 0:
         torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
 
 
     bxfinder.eval()
+    compress.eval()
     with torch.no_grad():
         for bi, data in tqdm(enumerate(val_dl), total=int(len(val_ds)/val_dl.batch_size)):
         #for data in val_dl:
@@ -474,35 +550,19 @@ for epoch in range(1, n_epochs+1):
             images = images.to(device)
             bbox = bbox.to(device)
             
-            #Chunking the images:
-            heatmaps = torch.zeros(batch_size,16,16,3,window_size,window_size)
-
-            bertLabels = torch.zeros(batch_size,768)
-            for i,image in enumerate(images):
-                windowed_images,x_size,y_size = windowize(image,window_size)
-                hm_scores = computeHeatmap(windowed_images,window_size,clipM,label[i],device)
-                #getHeatmap(windowed_images,hm_scores,x_size,y_size)
-                heatmaps[i] = getHeatmap(windowed_images,hm_scores,x_size,y_size,plot = False)
-                
+            recImgs = images
+            bertLabels = data['blabel']
+           
+           
+            latent = compress.encoder(recImgs) 
+           
+            outputs = bxfinder(latent, bertLabels.to(device))
             
-                #Encode label with bert
-                encoded_input = tokenizer(label[i], return_tensors='pt')
-                output = bertM(**encoded_input).last_hidden_state[0][0] #768 size
-                bertLabels[i] = output
-            #outputs = torch.tensor(outputs)
-            
-            
-            #Rebuild chunks into images
-            recImgs = heatmaps.permute(0,3,2,5,1,4) # [1,16a,16b,3,32,32] -> [1,3,16b,32,16a,32]
-            recImgs = recImgs.reshape(batch_size,3,512,512)
-            print(output.size(), heatmaps.size(), bertLabels.size(), recImgs.size())
-            
-            outputs = bxfinder(images, bertLabels.to(device))
-            loss = final_loss(outputs, bbox)
+            loss = loss = bb_intersection_over_union(outputs, bbox)#final_loss(outputs, bbox)
             val_loss += loss.item()*images.size(0)
             #break
         val_loss = val_loss/len(val_dl)
         print('E: {} V Loss: {:.3f}'.format(epoch, val_loss) + " %" + "{:.3}".format(np.exp(-abs(val_loss))*100))
-        print(outputs.transpose(0,1)[0][0:3], bbox.transpose(0,1)[0][0:3])
+        print(outputs.transpose(0,1)[0][0:2], bbox.transpose(0,1)[0][0:2])
         
 #'''
