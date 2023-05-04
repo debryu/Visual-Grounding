@@ -34,7 +34,7 @@ torch.set_num_interop_threads(8)
 #Bounding box data is bottom left x,y top right x,y 
 #well apparently no, its top left corner and bottom right x,y
 
-path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
+path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesL/sim/'
 n_epochs = 2
 init_lr = 0.0009
 clipping_value = 1 #gradient clip
