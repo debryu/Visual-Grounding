@@ -1,0 +1,26 @@
+
+  0%|                                         | 0/2600 [00:00<?, ?it/s]
+1
+similarity shape  torch.Size([8, 1, 16, 16])
+bert emb shape  torch.Size([8, 768])
+nn tensor shape torch.Size([8, 1024])
+bert tensor shape torch.Size([8, 4])
+loss  tensor([[3.7024e+04, 2.2477e+02, 2.1516e+05, 2.4055e+05],
+        [4.7334e-01, 3.3885e+02, 2.5960e+04, 2.3214e+05],
+        [1.2836e+04, 6.3302e+03, 6.8673e+04, 1.7401e+05],
+        [9.3531e+04, 5.4017e+04, 2.3302e+05, 1.8067e+05],
+        [7.2327e+04, 5.8067e+03, 1.5096e+05, 6.7722e+04],
+        [1.2302e+05, 2.8450e+02, 2.6214e+05, 1.1855e+05],
+        [1.2809e+05, 6.0146e+04, 2.2745e+05, 1.0129e+05],
+        [3.4453e+04, 1.1406e+04, 1.3024e+05, 1.4286e+05]], device='cuda:0',
+  0%|                                         | 0/2600 [00:04<?, ?it/s]
+Traceback (most recent call last):
+  File "distil_model.py", line 581, in <module>
+    loss.backward()
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\_tensor.py", line 487, in backward
+    torch.autograd.backward(
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\autograd\__init__.py", line 193, in backward
+    grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\autograd\__init__.py", line 88, in _make_grads
+    raise RuntimeError("grad can be implicitly created only for scalar outputs")
+RuntimeError: grad can be implicitly created only for scalar outputs

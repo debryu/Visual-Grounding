@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "distil_model.py", line 534, in <module>
+    BXfinder.load_state_dict.load_state_dict(torch.load(save_path + 'epochs/saved/epoch10.pth', map_location=torch.device(device)))
+AttributeError: 'function' object has no attribute 'load_state_dict'

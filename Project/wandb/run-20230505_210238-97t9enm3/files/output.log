@@ -1,0 +1,23 @@
+
+1
+  0%|                                         | 0/2600 [00:00<?, ?it/s]
+similarity shape  torch.Size([8, 1, 16, 16])
+bert emb shape  torch.Size([8, 768])
+nn tensor shape torch.Size([8, 1024])
+  0%|                                         | 0/2600 [00:05<?, ?it/s]
+Traceback (most recent call last):
+  File "distil_model.py", line 561, in <module>
+    outputs = bxfinder(similarity, bert_emb)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "distil_model.py", line 112, in forward
+    x = self.lin1(x)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\container.py", line 217, in forward
+    input = module(input)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\linear.py", line 114, in forward
+    return F.linear(input, self.weight, self.bias)
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (8x1028 and 36x128)

@@ -1,0 +1,50 @@
+{
+    "os": "Windows-10-10.0.19044-SP0",
+    "python": "3.8.16",
+    "heartbeatAt": "2023-05-05T19:04:39.458360",
+    "startedAt": "2023-05-05T19:04:38.720437",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "distil_model.py",
+    "codePath": "Project\\distil_model.py",
+    "git": {
+        "remote": "https://github.com/debryu/visual-grounding",
+        "commit": "0819838cf95ac4ae518a608fbb3fee5aacf9c9a0"
+    },
+    "email": "nicola.debole@gmail.com",
+    "root": "C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/visual_grounding/visual-grounding",
+    "host": "DESKTOP-VDBR0MJ",
+    "username": "debryu",
+    "executable": "C:\\Users\\debryu\\miniconda3\\envs\\pytorch\\python.exe",
+    "cpu_count": 6,
+    "cpu_count_logical": 12,
+    "cpu_freq": {
+        "current": 3301.0,
+        "min": 0.0,
+        "max": 3301.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3301.0,
+            "min": 0.0,
+            "max": 3301.0
+        }
+    ],
+    "disk": {
+        "total": 930.9518623352051,
+        "used": 826.8080177307129
+    },
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3060",
+            "memory_total": 12884901888
+        }
+    ],
+    "memory": {
+        "total": 15.924671173095703
+    }
+}

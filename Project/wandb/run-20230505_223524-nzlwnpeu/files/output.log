@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "distil_model.py", line 534, in <module>
+    bxfinder.load_state_dict(torch.load(save_path + 'epochs/saved/epoch10.pth', map_location=torch.device(device)))
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\serialization.py", line 791, in load
+    with _open_file_like(f, 'rb') as opened_file:
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\serialization.py", line 271, in _open_file_like
+    return _open_file(name_or_buffer, mode)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\serialization.py", line 252, in __init__
+    super().__init__(open(name, mode))
+FileNotFoundError: [Errno 2] No such file or directory: 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/visual_grounding/visual-grounding/Project/distil-model/checkpoints/epochs/saved/epoch10.pth'

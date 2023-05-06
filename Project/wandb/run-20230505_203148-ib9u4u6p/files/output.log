@@ -1,0 +1,18 @@
+  0%|                                          | 0/325 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "distil_model.py", line 483, in <module>
+    for bi, batch in tqdm(enumerate(test_dl), total=int(len(test_ds)/test_dl.batch_size)):
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\tqdm\std.py", line 1178, in __iter__
+    for obj in iterable:
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\utils\data\dataloader.py", line 634, in __next__
+    data = self._next_data()
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\utils\data\dataloader.py", line 678, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\utils\data\_utils\fetch.py", line 51, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\utils\data\_utils\fetch.py", line 51, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "distil_model.py", line 151, in __getitem__
+    label = [data['label']['sentences'][0]['raw']] #take the first label raw
+TypeError: tuple indices must be integers or slices, not str
+1

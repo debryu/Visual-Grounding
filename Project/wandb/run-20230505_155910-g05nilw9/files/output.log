@@ -1,0 +1,35 @@
+
+1
+  0%|                                         | 0/2737 [00:00<?, ?it/s]
+torch.Size([8, 16, 16, 3, 32, 32])
+Finished preprocessing with dimensions torch.Size([648, 3, 224, 224])
+nn tensor shape torch.Size([8, 32])
+bert tensor shape torch.Size([8, 4])
+boxA tensor([[ 25.7488,   0.0000,  84.6983,  79.8183],
+        [ 32.2486,   0.0000, 128.9446,  61.6868],
+        [ 31.7459,  22.7024, 142.3232,  65.6206],
+        [ 56.1568,  18.6055, 117.7438, 131.7049],
+        [ 41.2812,  92.8419, 214.6356, 157.7796],
+        [ 82.7319,  99.7404, 237.2795, 108.8096],
+        [ 91.7683,  83.9655, 246.9161, 102.6277],
+        [ 69.6462,  82.6815, 209.8184, 189.5416]], device='cuda:0',
+       grad_fn=<CopySlices>)
+boxB tensor([[  0.0000,   0.0000, 512.0000, 512.0000],
+        [337.7760, 168.4924, 435.6000, 468.5819],
+        [100.2040, 122.6240, 328.4550, 505.6800],
+        [306.2880, 194.4401, 457.5120, 505.0934],
+        [207.9680,   2.1120, 416.7920, 316.2133],
+        [113.2960,  64.0000, 427.2400, 461.8347],
+        [ 27.6320,  80.5411, 498.9680, 436.0633],
+        [158.6481,  79.3920, 512.0000, 422.2560]], device='cuda:0')
+loss1: tensor([0.9821, 1.8131, 1.3568, 1.7237, 1.3465, 1.0777, 0.9827, 1.0966],
+       device='cuda:0', grad_fn=<RsubBackward1>)
+  0%|                                         | 0/2737 [03:19<?, ?it/s]
+Traceback (most recent call last):
+  File "distil_model.py", line 518, in <module>
+    loss.backward()
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\_tensor.py", line 487, in backward
+    torch.autograd.backward(
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\autograd\__init__.py", line 200, in backward
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt

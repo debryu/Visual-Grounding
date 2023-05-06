@@ -1,0 +1,21 @@
+1
+similarity shape  torch.Size([8, 8, 1, 16, 16])
+  0%|                                          | 0/325 [00:02<?, ?it/s]
+Traceback (most recent call last):
+  File "distil_model.py", line 560, in <module>
+    print('bert emb shape ', bert_emb.shape)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "distil_model.py", line 100, in forward
+    x = self.conv1(image)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\container.py", line 217, in forward
+    input = module(input)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\conv.py", line 463, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+  File "C:\Users\debryu\miniconda3\envs\pytorch\lib\site-packages\torch\nn\modules\conv.py", line 459, in _conv_forward
+    return F.conv2d(input, weight, bias, self.stride,
+RuntimeError: Expected 3D (unbatched) or 4D (batched) input to conv2d, but got input of size: [8, 8, 1, 16, 16]

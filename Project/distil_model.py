@@ -27,17 +27,21 @@ start_execution = time.time()
 
 torch.autograd.set_detect_anomaly(True)
 
-path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesL/'
-n_epochs = 25
-init_lr = 0.0009
+loadModel = False
+path = 'C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/picklesN/sim/'
+save_path = "C:/Users/debryu/Desktop/VS_CODE/HOME/Deep_Learning/visual_grounding/visual-grounding/Project/distil-model/checkpoints/"
+n_epochs = 250
+init_lr = 0.1
 clipping_value = 1 #gradient clip
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq = 1
 batch_size = 8
-resize_value = 515
+resize_value = 512
 resize = True
+verbose = True
+verbosissimo = False
 
 def loadData(path,split):
     files =  os.listdir(path + split)
@@ -53,17 +57,17 @@ class BXfinder(nn.Module):
     def __init__(self):
         super(BXfinder, self).__init__()
         # Input 3 channels
-        self.conv1 = nn.Sequential(nn.Conv2d(1, 8, kernel_size=3,stride=1,padding=0),
+        self.conv1 = nn.Sequential(nn.Conv2d(1, 16, kernel_size=3,stride=1,padding=0),
                                    nn.LeakyReLU(inplace=True)
                                   )
         
         # Shape [8 channels, 14x14 image]
-        self.conv2 = nn.Sequential(nn.Conv2d(8, 16, kernel_size=3,stride=1,padding=0),
+        self.conv2 = nn.Sequential(nn.Conv2d(16, 32, kernel_size=3,stride=1,padding=0),
                                    nn.MaxPool2d(kernel_size=2, stride=2),
                                    nn.LeakyReLU(inplace=True)
                                   )
         # Shape [16 channels, 5x5 image]
-        self.conv3 = nn.Sequential(nn.Conv2d(16, 32, kernel_size=5,stride=1,padding=0),
+        self.conv3 = nn.Sequential(nn.Conv2d(32, 124, kernel_size=5,stride=1,padding=0),
                                   nn.MaxPool2d(kernel_size=2, stride=2),
                                   nn.LeakyReLU(inplace=True)
                                   )
@@ -71,29 +75,27 @@ class BXfinder(nn.Module):
 
         self.bert_compressor = nn.Sequential(nn.Linear(768,256),
                                              nn.LeakyReLU(inplace=True),
-                                             nn.Linear(256,32),
+                                             nn.Linear(256,64),
+                                             nn.LeakyReLU(inplace=True),
+                                             nn.Linear(64,4),
                                              nn.LeakyReLU(inplace=True),
                                             )
         
         self.lin1 = nn.Sequential(#nn.Flatten(),
-                                 nn.Linear(32 + 32, 128), #3136
-                                 nn.BatchNorm1d(128),
-                                 nn.LeakyReLU(inplace=True),
-                                 nn.Linear(128, 256),
+                                 nn.Linear(124 + 4, 256), #3136
                                  nn.BatchNorm1d(256),
-                                 nn.LeakyReLU(inplace=True),
-                                 nn.Sigmoid()
+                                 nn.LeakyReLU(inplace=True)
                                  )
         
-        self.lin2 = nn.Sequential(nn.Linear(256,128),
+        self.lin2 = nn.Sequential(
+                                  nn.Linear(256,128),
                                   nn.LeakyReLU(inplace=True),
                                   nn.Linear(128,64),
                                   nn.LeakyReLU(inplace=True),
-                                  nn.Linear(64,32),
-                                  nn.LeakyReLU(inplace=True),
-                                  nn.Linear(32,4),
+                                  nn.Linear(64,4),
+                                  #nn.LeakyReLU(inplace=True)
                                  )
-        #self.last = nn.ReLU()
+        
                                           
     def forward(self, image, bert_emb):
         #x = self.down(x)
@@ -104,17 +106,31 @@ class BXfinder(nn.Module):
         #print(x.size())
         x = self.conv3(x)
         x = self.flat(x)
-        print('nn tensor shape', x.shape)
+        #print('nn tensor shape', x.shape)
         bert_comp_emb = self.bert_compressor(bert_emb)
-        print('bert tensor shape', bert_comp_emb.shape)
+        #print('bert tensor shape', bert_comp_emb.shape)
         x = torch.cat((x, bert_comp_emb), dim=1)
+        #x = torch.cat((x, im_shape), dim=1)
         #print(x.size(), bertx.size())
         x = self.lin1(x)
-        x = self.lin2(x)
-        #x = self.last(x)
-        #print(x.size())
+        x = self.lin2(x)*resize_value
         return x
 
+
+def starting_loss(outputs, bbox):
+    #loss = 0
+    #for i in range(0,4):
+    #    loss += criterion(outputs.transpose(1,0)[i], bbox.transpose(1,0)[i])
+    #return loss/4
+    boxA,boxB = outputs, bbox
+    boxA[:,2] = boxA[:,0]+boxA[:,2]
+    boxA[:,3] = boxA[:,1]+boxA[:,3]
+    boxB[:,2] = boxB[:,0]+boxB[:,2]
+    boxB[:,3] = boxB[:,1]+boxB[:,3]
+    loss = torch.sum(torch.pow(boxA - boxB,2))
+    #print('boxA', boxA)
+    #print('boxB', boxB)
+    return loss
 
 def final_loss(outputs, bbox):
     #loss = 0
@@ -127,7 +143,14 @@ def final_loss(outputs, bbox):
     boxB[:,2] = boxB[:,0]+boxB[:,2]
     boxB[:,3] = boxB[:,1]+boxB[:,3]
     l1 = tvo.generalized_box_iou_loss(boxA,boxB,reduction='none')
-    print('loss1:', l1)
+    if(verbose):
+        if(verbosissimo):
+            print('boxA', boxA)
+            print('boxB', boxB)
+            print('loss1:', l1)
+        else:
+            print('boxA', boxA[0])
+            print('boxB', boxB[0]) 
     return tvo.generalized_box_iou_loss(boxA,boxB,reduction='sum')
 
 
@@ -179,25 +202,73 @@ class CustomDataset(Dataset):
               'bbox':torch.tensor(bbox),
               'orientation:': orientation}
 
+class simDataset(Dataset):
+
+    def __init__(self, data):
+    #WHAT DO WE PUT HERE?
+        self.data = data
+
+    def __len__(self):
+    #JUST THE LENGTH OF THE DATASET
+        return len(self.data)
+
+    def __getitem__(self, idx):
+    #TAKE ONE ITEM FROM THE DATASET
+    
+        
+        with open(self.data[idx], 'rb') as file:             
+            data = pickle.load(file)
+            if True:#data['img']['mode'] == 'RGB': TODO   
+                label = data['label'] #take the first label raw
+                
+                img = data['img']
+                bbox = data['bbox']
+                bert_emb = data['be']
+                sim = data['sim']
+        #decode = self.tokenizer.convert_ids_to_tokens(encoding_text['input_ids'].flatten())
+
+        return {'img':img,
+              'label':label,
+              'bbox':bbox,
+              'sim': sim,
+              'be': bert_emb
+              }
+
+
 #CREATE THE DATALOADER
 def create_data_loader_CustomDataset(data, batch_size, eval=False):
     ds = CustomDataset(data=data)
 
     if not eval:
-        return DataLoader(ds, batch_size=batch_size, shuffle=True), len(ds)
+        return DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True), len(ds)
 
     else:
-        return DataLoader(ds, batch_size=batch_size, shuffle=False), len(ds)
+        return DataLoader(ds, batch_size=batch_size, shuffle=False,  drop_last=True), len(ds)
 
-train_ds = loadData(path, 'train/')
-val_ds = loadData(path, 'val/')
+
+#CREATE THE DATALOADER
+def create_data_loader_simDataset(data, batch_size, eval=False):
+    ds = simDataset(data=data)
+
+    if not eval:
+        return DataLoader(ds, batch_size=1, shuffle=True, drop_last=True), len(ds)
+
+    else:
+        return DataLoader(ds, batch_size=1, shuffle=False,  drop_last=True), len(ds)
+
+
+#train_ds = loadData(path, 'train/')
+#val_ds = loadData(path, 'val/')
 test_ds = loadData(path, 'test/')
 
 
 
-train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
-val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
-test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
+#train_dl, train_length = create_data_loader_CustomDataset(train_ds, batch_size, eval=False)
+#val_dl, train_length = create_data_loader_CustomDataset(val_ds, batch_size, eval=True)
+#test_dl, train_length = create_data_loader_CustomDataset(test_ds, batch_size, eval=True)
+
+
+test_dl, train_length = create_data_loader_simDataset(test_ds, batch_size, eval=False)
 
 import clip
 import numpy as np
@@ -221,7 +292,7 @@ def bwindowize(image,window_size):
         x = windows.shape[1]
         #Also permute x and y torch.Size([2, 16, 16, 3, 32, 32])
         windows = windows.unfold(2,window_size,window_size)
-        print(windows.shape)
+        #print(windows.shape)
         #print(windows.shape)
         y = windows.shape[2]
         #print(y)
@@ -307,15 +378,15 @@ def bcomputeHeatmap(windows,window_size,x_size,batch_size,model,tok_labels,devic
         # Compute the similarity score for each kernel of each image from the batch
         # 1)First we need to preprocess all the images 
         # torch.Size([484, 192, 192, 3])
-        print('Starting preprocessing', resulting_kernels.shape)
+        #print('Starting preprocessing', resulting_kernels.shape)
         preprocess_input = preprocess(resulting_kernels)
         #print(preprocess_input.shape)
         print('Finished preprocessing with dimensions', preprocess_input.shape)
         
         # Reshape the tensor to the original shape
         preprocess_input = preprocess_input.reshape(batch_size, (x_size-kernel_size+1)**2,3,224,224).permute(0,1,3,4,2)
-        print('last shape',preprocess_input.shape)
-        print('last shape',preprocess_input[0].shape)
+        #print('last shape',preprocess_input.shape)
+        #print('last shape',preprocess_input[0].shape)
 
 
         '''
@@ -398,48 +469,61 @@ toTensor = transforms.ToTensor()
 
 
 ''' 
-OLD BLOCK
-#Do it for an entire batch
-for batch in val_dl:
-    
-    #1) Compute the heatmap
-
-    #2) Compute annotation embedding
-
-    #3) Feed the heatmap and annotation embedding to the model
-    
-
-    #Initialize a zero tensor
-    
-    images,label,bbox = batch['img'], batch['label'][0], batch['bbox']
-    images = images.to(device)
-    bbox = bbox.to(device)
-    
-    #print(images.shape)
-    #asd = preprocess(images)
-    #print(preprocess(images).shape)
-    #plt.imshow(asd[0].permute(2,1,0).to('cpu'))
-
-    tok_labels = clip.tokenize(label).to(device)
-    print('shape of the labels ',tok_labels.shape)
-    #Chunking the images:
-    #Dimension should be [batch_size,x_size,y_size,3,window_size,window_size]
-    windowed_images,x_size,y_size = bwindowize(images, window_size)
-    print('shape of the windowed image ', windowed_images.shape)
-    #Compute the heatmap score for each kernel
-    print(label)
-    heatmaps_scores = bcomputeHeatmap(windowed_images, window_size, x_size,batch_size, clipM,label, device)
-    print('shape of the heatmap', heatmaps_scores.shape)
+ TRAINN
 
 
-    break
-    
-    
-end_execution = time.time()
-print(end_execution-start_execution)
+ 
 
 
-END OLD BLOCK
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 '''
 
 from transformers import BertTokenizer, BertModel
@@ -450,7 +534,8 @@ bert_model = BertModel.from_pretrained("bert-base-uncased")
 def computeBertEncoding(text, batch_size):
     #Encode label with bert
     bert = torch.zeros(batch_size,768)
-    for i in range(0,batch_size):
+    #print(text)
+    for i in range(batch_size):
         encoded_input = bert_tokenizer(text[i], return_tensors='pt')
         output = bert_model(**encoded_input).last_hidden_state[0][0] #768 size
         bert[i] = output
@@ -462,58 +547,82 @@ bxfinder = BXfinder();
 bxfinder.to(device)
 optimizer = torch.optim.AdamW(bxfinder.parameters(), lr=init_lr)  
 
+
+
+import wandb
+wandb.init(project="visual-grounding", entity="unitnais")
+
+if(loadModel):
+    bxfinder.load_state_dict(torch.load(save_path + 'epochs/saved/distil-v1.pth', map_location=torch.device(device)))
+
+
 for epoch in range(1, n_epochs+1):
     train_loss = 0.0
     val_loss= 0.0
     print(epoch)
-
-    # Set bxfinder to train mode  
     bxfinder.train()
-  
-    i=0
-    for bi, batch in tqdm(enumerate(train_dl), total=int(len(train_ds)/train_dl.batch_size)):
     
-        images,label,bbox = batch['img'], batch['label'][0], batch['bbox']
-        images = images.to(device)
-        bbox = bbox.to(device)
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    i=0
+    for bi, batch in tqdm(enumerate(test_dl), total=int(len(test_ds)/test_dl.batch_size)):
+    
+        images,label,bbox, bert_emb, similarity = batch['img'], batch['label'][0], batch['bbox'], batch['be'], batch['sim']
+        images = images.to(device).squeeze(0)
+        bbox = bbox.to(device).squeeze(0)
+        bert_emb = bert_emb.to(device).squeeze(0)
+        similarity = similarity.to(device).squeeze(0)
+        # Compute the shape for each image in the batch
+        #im_shapes = [img.shape[-2:] for img in images]
+        #print('shape of the images ',im_shapes)
         
-        #print(images.shape)
-        #asd = preprocess(images)
         #print(preprocess(images).shape)
         #plt.imshow(asd[0].permute(2,1,0).to('cpu'))
-        bert_embeddings = computeBertEncoding(label, batch_size).to(device)
-        print('bert embeddings shape', bert_embeddings.shape)
+        #bert_embeddings = computeBertEncoding(label, batch_size).to(device)
+        #print('bert embeddings shape', bert_embeddings.shape)
 
-        tok_labels = clip.tokenize(label).to(device)
-        print('shape of the labels with clip ',tok_labels.shape)
+        #tok_labels = clip.tokenize(label).to(device)
+        #print('shape of the labels with clip ',tok_labels.shape)
         #Chunking the images:
         #Dimension should be [batch_size,x_size,y_size,3,window_size,window_size]
-        windowed_images,x_size,y_size = bwindowize(images, window_size)
-        print('shape of the windowed image ', windowed_images.shape)
+        #windowed_images,x_size,y_size = bwindowize(images, window_size)
+        #print('shape of the windowed image ', windowed_images.shape)
         #Compute the heatmap score for each kernel
         #print(label)
-        heatmaps_scores = bcomputeHeatmap(windowed_images, window_size, x_size,batch_size, clipM,label, device)
+        #heatmaps_scores = bcomputeHeatmap(windowed_images, window_size, x_size,batch_size, clipM,label, device)
 
-        heatmaps_scores = heatmaps_scores.unsqueeze(1)
-        print('shape of the heatmap', heatmaps_scores.shape)   
-        
-        outputs = bxfinder(heatmaps_scores, bert_embeddings)
-        loss = final_loss(outputs, bbox)#final_loss(outputs, bbox)
-        print('loss ', loss)
+        #heatmaps_scores = heatmaps_scores.unsqueeze(1)
+        #print('shape of the heatmap', heatmaps_scores.shape)   
+        #print('similarity shape ', similarity.shape)
+        #print('bert emb shape ', bert_emb.shape)
+        outputs = bxfinder(similarity, bert_emb)
+        loss = starting_loss(outputs, bbox)#final_loss(outputs, bbox)
+        lossBB = final_loss(outputs, bbox)
+        #print('loss ', loss)
+        wandb.log({'loss': loss, 'lossBB': lossBB})
+        #wandb.log({'outputs': outputs, 'bbox': bbox})
         #print(outputs)
         optimizer.zero_grad()
         loss.backward()        
         torch.nn.utils.clip_grad_norm_(bxfinder.parameters(), clipping_value)
         optimizer.step()
         train_loss += loss.item()*images.size(0)
-        print('------   BB: \n', outputs, '\n ', bbox)
+        #print('------   BB: \n', outputs, '\n ', bbox)
         #break
-    
-    train_loss = train_loss/len(train_dl)
+        '''
+        if bi%100 == 0:
+                torch.save(bxfinder.state_dict(), save_path + f'distil-model{bi}.pth')
+                # Log model to Wandb
+                wandb.save(f'distil-model{bi}.pth')
+        '''
+    train_loss = train_loss/len(test_dl)
     print('E: {} T Loss: {:.3f}'.format(epoch, train_loss) + " %" + "{:.3}".format(np.exp(-abs(train_loss))*100))
     print(outputs.transpose(0,1)[0][0:2], bbox.transpose(0,1)[0][0:2])
     if epoch%save_freq == 0:
-        torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
+        torch.save(bxfinder.state_dict(), save_path + 'epochs/epoch{0:05d}.pth'.format(epoch))
+        wandb.save(f'distil-model{bi}.pth')
+
 
     ''' SKIP EVALUATION FOR NOW
     bxfinder.eval()
