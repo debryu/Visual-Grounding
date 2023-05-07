@@ -1,0 +1,13 @@
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Current SDK version is 0.15.2
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Configure stats pid to 15876
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Loading settings from C:\Users\Mateo-drr\.config\wandb\settings
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Loading settings from C:\Users\Mateo-drr\Documents\Mateo\Universidades\Trento\2S\ML\ClipGrounding\visual-grounding\wandb\settings
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2023-05-07 10:36:34,797 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2023-05-07 10:36:34,800 INFO    MainThread:15876 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'model.py', 'program': 'c:\\users\\mateo-drr\\documents\\mateo\\universidades\\trento\\2s\\ml\\clipgrounding\\visual-grounding\\model.py'}
+2023-05-07 10:36:34,800 INFO    MainThread:15876 [wandb_init.py:_log_setup():507] Logging user logs to C:\Users\Mateo-drr\Documents\Mateo\Universidades\Trento\2S\ML\ClipGrounding\visual-grounding\wandb\run-20230507_103634-6fhunugf\logs\debug.log
+2023-05-07 10:36:34,800 INFO    MainThread:15876 [wandb_init.py:_log_setup():508] Logging internal logs to C:\Users\Mateo-drr\Documents\Mateo\Universidades\Trento\2S\ML\ClipGrounding\visual-grounding\wandb\run-20230507_103634-6fhunugf\logs\debug-internal.log
+2023-05-07 10:36:34,800 INFO    MainThread:15876 [wandb_init.py:init():547] calling init triggers
+2023-05-07 10:36:34,801 INFO    MainThread:15876 [wandb_init.py:init():554] wandb.init called with sweep_config: {}
+config: {}
+2023-05-07 10:36:34,801 INFO    MainThread:15876 [wandb_init.py:init():591] wandb.init() called when a run is still active

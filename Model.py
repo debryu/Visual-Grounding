@@ -19,24 +19,29 @@ from tqdm import tqdm
 import pickle
 from torchvision import transforms
 import torchvision.ops as tvo
+from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2, FasterRCNN_ResNet50_FPN_V2_Weights
+import wandb
+
 
 torch.backends.cudnn.benchmark = True 
 torch.set_num_threads(8)
 torch.set_num_interop_threads(8)
+#wandb.init(name="FPNv2-Clip-a")
+wandb.init(project="visual-grounding", entity="unitnais")
 
 #Bounding box data is bottom left x,y top right x,y 
-#well apparently no, its top left corner and bottom right x,y
+#well apparently no, its top left corner and w,h
 
 path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
-n_epochs = 2
+n_epochs = 50
 init_lr = 0.00001
 clipping_value = 1 #gradient clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 criterion = nn.MSELoss()
 save_freq =1
-batch_size = 56
-resize = 256
+batch_size = 16
+resize = 128
 window_size=32
 
 toTensor = transforms.ToTensor()
@@ -48,6 +53,17 @@ plot = False
 #encoder
 numc=4
 loaddir = "D:/MachineLearning/RinRUnpix/finalOptions/"+str(numc)+'/UtMq-cprQ2-clipint8-to0-fmod/autoenc00115.pth'
+
+weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
+model = fasterrcnn_resnet50_fpn_v2(weights=weights, box_score_thresh=0.9)
+
+# Freeze model weights
+
+for param in model.parameters():
+    param.requires_grad = False
+
+#model.rpn.requires_grad = True
+#model.backbone.requires_grad = True
 
 
 def loadData(path,split):
@@ -409,44 +425,97 @@ class BXfinder(nn.Module):
                                 nn.Linear(1024, 768),
                                 nn.GELU(),
                                 )
-        self.L3 = nn.Sequential(nn.Linear(1536, 4096),
+        self.L3 = nn.Sequential(nn.Linear(33536, 4096),
+                                #nn.Dropout(0.1),
                                 nn.GELU(),
                                 nn.Linear(4096, 8192),
+                                #nn.Dropout(0.3),
                                 nn.GELU(),
                                 nn.Linear(8192, 8192),
+                                #nn.Dropout(0.5),
                                 nn.GELU(),
                                 nn.Linear(8192, 8192),
+                                #nn.Dropout(0.3),
                                 nn.GELU(),
                                 nn.Linear(8192, 2048),
+                                #nn.Dropout(0.1),
                                 nn.GELU(),
                                 nn.Linear(2048, 4),
-                                nn.Sigmoid()
+                                nn.ReLU()
                                 )
         
-        self.idk2 = nn.Linear(3136,1024)
+        self.idk2 = nn.Sequential(conv(320,128,3,1,1,padding_mode='reflect'),
+                                  nn.GELU(),
+                                  conv(128,64,3,1,1,padding_mode='reflect'),
+                                  nn.GELU(),
+                                  conv(64,32,3,1,1,padding_mode='reflect'),
+                                  nn.GELU())
+        #self.mha = nn.Sequential(nn.Embedding(1536,1024),
+        #                         nn.MultiheadAttention(embed_dim=1024, num_heads=8))
+        self.up5 = nn.Sequential(conv(256, 256,3,1,1,padding_mode='reflect'),
+                                nn.GELU(),
+                                nn.PixelShuffle(2))
+        self.up4 = nn.Sequential(conv(256+64, 256,3,1,1,padding_mode='reflect'),
+                                nn.GELU(),
+                                nn.PixelShuffle(2))
+        
+        
+        self.idk = model.backbone
         
     def forward(self,x, bertx):
         #x = self.down(x)
-        #print(x.size())
+        x = self.idk(x)
+        
+        
+        x1 = x.popitem(last=False)[1]
+        x2 = x.popitem(last=False)[1]
+        x3 = x.popitem(last=False)[1]
+        x4 = x.popitem(last=False)[1]
+        x5 = x.popitem(last=False)[1]
+        
+        x1.requires_grad = True
+        x2.requires_grad = True
+        x3.requires_grad = True
+        x4.requires_grad = True
+        x5.requires_grad = True
+        
+        x5 = self.up5(x5) #256,2,2 -> 64,4,4
+        x4 = torch.cat((x4,x5), dim=1) # 256+64,4,4
+        x4 = self.up4(x4) #320,4,4 -> 64,8,8
+        x3 = torch.cat((x3,x4), dim=1) # 256+64,8,8
+        x3 = self.up4(x3) #320,8,8 -> 64,16,16
+        x2 = torch.cat((x2,x3), dim=1) # 256+64,16,16
+        x2 = self.up4(x2) #320,16,16 -> 64,32,32
+        x1 = torch.cat((x1,x2), dim=1) # 256+64,32,32
+
+        
+        x = self.idk2(x1)
         x = self.flat(x)
         #print(x.size())
-        x = self.L1(x)
+        #x = self.flat(x)
         #print(x.size())
-        x = self.L2(x)
+        #x = self.L1(x)
+        #print(x.size())
+        #x = self.L2(x)
         #print(x.size(), bertx.size())
-        bertx = self.L2(bertx)
+        #bertx = self.L2(bertx)
         x = torch.cat((x, bertx), dim=1)
+        #x = self.mha(x)
         #print(x.size(), bertx.size())
         x = self.L3(x)
         #print(x.size())
-        return x*(resize-1)#torch.clip(x,0,1)*resize
+        return x#*(resize-1)#torch.clip(x,0,1)*resize
   
 #init the autoencoder    
-compress = loadCAE(device)
+#compress = loadCAE(device)
 
 bxfinder = BXfinder();
 bxfinder.to(device)
+model.backbone.to(device)
 optimizer = torch.optim.AdamW(bxfinder.parameters(), lr=init_lr)  
+
+#model.rpn = nn.Sequential()
+#model.roi_heads = nn.Sequential()
 
 def final_loss(outputs, bbox):
     loss = 0
@@ -460,7 +529,15 @@ def final_loss(outputs, bbox):
     boxB[:,2] = boxB[:,0]+boxB[:,2]
     boxB[:,3] = boxB[:,1]+boxB[:,3]
     '''
-    l1 = tvo.generalized_box_iou_loss(outputs,bbox,reduction='mean')
+    #print(tvo.generalized_box_iou_loss(outputs,bbox))
+    neg = tvo.generalized_box_iou_loss(outputs,bbox)
+    if (neg < 0).any():
+        mask = neg >= 0
+        pos = torch.masked_select(neg, mask)
+        l1 = torch.mean(pos)
+    else:
+        l1 = tvo.generalized_box_iou_loss(outputs,bbox,reduction='mean')
+    
     l2 = loss/4
     
     return torch.sqrt(l1*l2)
@@ -472,7 +549,7 @@ for epoch in range(1, n_epochs+1):
     print(epoch)
     
     bxfinder.train()
-    compress.train()
+    #compress.train()
     i=0
     for bi, data in tqdm(enumerate(train_dl), total=int(len(train_ds)/train_dl.batch_size)):
     
@@ -496,11 +573,14 @@ for epoch in range(1, n_epochs+1):
             
         #i+=1    
         
-        latent = compress.encoder(recImgs)
+        #bb = model.backbone(recImgs)
+        #aa = model.fpn(bb)
+        
+        #latent = compress.encoder(recImgs)
 #'''    
         #latent.requires_grad = True
      
-        outputs = bxfinder(latent, bertLabels.to(device))
+        outputs = bxfinder(recImgs, bertLabels.to(device))
         loss = final_loss(outputs, bbox)
         #print(outputs)
         optimizer.zero_grad()
@@ -510,6 +590,7 @@ for epoch in range(1, n_epochs+1):
         train_loss += loss.item()*images.size(0)
         #break
         
+        wandb.log({'tloss': loss})
         #if i%10 == 0:
         #    print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
         
@@ -517,13 +598,17 @@ for epoch in range(1, n_epochs+1):
     
     train_loss = train_loss/len(train_dl)
     print('E: {} T Loss: {:.3f}'.format(epoch, train_loss) + " %" + "{:.3}".format(np.exp(-abs(train_loss))*100))
-    print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
+    print(outputs[0], bbox[0])
     if epoch%save_freq == 0:
-        torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
+        try:
+            torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
+        except:
+            print('Error saving')
+        wandb.save(path + 'wandb/wandb{0:05d}.pth'.format(epoch))
 
 
     bxfinder.eval()
-    compress.eval()
+    #compress.eval()
     with torch.no_grad():
         for bi, data in tqdm(enumerate(val_dl), total=int(len(val_ds)/val_dl.batch_size)):
         #for data in val_dl:
@@ -537,15 +622,18 @@ for epoch in range(1, n_epochs+1):
             bertLabels = data['blabel']
            
            
-            latent = compress.encoder(recImgs) 
+            #latent = compress.encoder(recImgs) 
            
-            outputs = bxfinder(latent, bertLabels.to(device))
+            outputs = bxfinder(recImgs, bertLabels.to(device))
             
             loss = loss = final_loss(outputs, bbox)
             val_loss += loss.item()*images.size(0)
+            
             #break
+            wandb.log({'vloss': loss})
+            
         val_loss = val_loss/len(val_dl)
         print('E: {} V Loss: {:.3f}'.format(epoch, val_loss) + " %" + "{:.3}".format(np.exp(-abs(val_loss))*100))
-        print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
+        print(outputs[0], bbox[0])
         
 #'''
