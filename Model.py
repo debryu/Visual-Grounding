@@ -26,14 +26,19 @@ import wandb
 torch.backends.cudnn.benchmark = True 
 torch.set_num_threads(8)
 torch.set_num_interop_threads(8)
+
+wb = True
+
 #wandb.init(name="FPNv2-Clip-a")
-wandb.init(project="visual-grounding", entity="unitnais")
+if wb:
+    wandb.init(name='RCNN-Clip',project="visual-grounding", entity="unitnais")
 
 #Bounding box data is bottom left x,y top right x,y 
 #well apparently no, its top left corner and w,h
 
 path = 'C:/Users/Mateo-drr/Documents/picklesL/sim/'
-n_epochs = 50
+spath = 'D:/Universidades/Trento/2S/ML/epochs/'
+n_epochs = 100
 init_lr = 0.00001
 clipping_value = 1 #gradient clip
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -57,6 +62,14 @@ loaddir = "D:/MachineLearning/RinRUnpix/finalOptions/"+str(numc)+'/UtMq-cprQ2-cl
 weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
 model = fasterrcnn_resnet50_fpn_v2(weights=weights, box_score_thresh=0.9)
 
+
+config = {
+    "learning_rate": init_lr,
+    "batch_size": batch_size,
+    "num_epochs": n_epochs,
+    "resize":resize
+}
+wandb.config.update(config)
 # Freeze model weights
 
 for param in model.parameters():
@@ -542,7 +555,7 @@ def final_loss(outputs, bbox):
     
     return torch.sqrt(l1*l2)
 
-  
+
 for epoch in range(1, n_epochs+1):
     train_loss = 0.0
     val_loss= 0.0
@@ -588,9 +601,10 @@ for epoch in range(1, n_epochs+1):
         torch.nn.utils.clip_grad_norm_(bxfinder.parameters(), clipping_value)
         optimizer.step()
         train_loss += loss.item()*images.size(0)
-        #break
         
-        wandb.log({'tloss': loss})
+        
+        if wb:
+            wandb.log({'tloss': loss})
         #if i%10 == 0:
         #    print(outputs.transpose(0,1)[0][0:4], bbox.transpose(0,1)[0][0:4])
         
@@ -601,10 +615,12 @@ for epoch in range(1, n_epochs+1):
     print(outputs[0], bbox[0])
     if epoch%save_freq == 0:
         try:
-            torch.save(bxfinder.state_dict(), path + 'epochs/epoch{0:05d}.pth'.format(epoch))
-        except:
-            print('Error saving')
-        wandb.save(path + 'wandb/wandb{0:05d}.pth'.format(epoch))
+            torch.save(bxfinder.state_dict(), spath + 'epoch{0:05d}.pth'.format(epoch))
+        except Exception as e:
+            print("An error occurred:", e)
+            
+        if wb:
+            wandb.save(path + 'wandb/wandb{0:05d}.pth'.format(epoch))
 
 
     bxfinder.eval()
@@ -629,11 +645,12 @@ for epoch in range(1, n_epochs+1):
             loss = loss = final_loss(outputs, bbox)
             val_loss += loss.item()*images.size(0)
             
-            #break
-            wandb.log({'vloss': loss})
             
         val_loss = val_loss/len(val_dl)
         print('E: {} V Loss: {:.3f}'.format(epoch, val_loss) + " %" + "{:.3}".format(np.exp(-abs(val_loss))*100))
         print(outputs[0], bbox[0])
+        
+        if wb:
+            wandb.log({'Train loss': train_loss, 'Validation Loss': val_loss})
         
 #'''
